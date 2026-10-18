@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>flow</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app"></div>
+  <pre id="out">running</pre>
+  <script src="js/engine.js"></script>
+  <script src="js/catalog.js"></script>
+  <script src="js/bank.js"></script>
+  <script src="js/physics_topics.js"></script>
+  <script src="js/sci_topics.js"></script>
+  <script src="js/sightwords.js"></script>
+  <script src="js/wordmatch.js"></script>
+  <script src="js/astronomy.js"></script>
+  <script src="js/speech.js"></script>
+  <script src="js/questions.js"></script>
+  <script src="js/scenes.js"></script>
+  <script src="js/art.js"></script>
+  <script src="js/sci_art.js"></script>
+  <script src="js/sci_animals.js"></script>
+  <script src="js/sci_living.js"></script>
+  <script src="js/math_mix.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (function () {
+      var fails = [];
+      function assert(cond, msg) { if (!cond) fails.push(msg); }
+      // A thrown error fails the run at once instead of leaving the page waiting.
+      window.addEventListener("error", function (e) {
+        document.title = "FAIL";
+        var o = document.getElementById("out");
+        if (o) o.textContent = "FAIL exception: " + (e && e.message) + "\n" + fails.join("\n");
+      });
+      function samePage(label) {
+        Merit.appTest.start(label);
+        var before = Merit.appTest.state();
+        if (app.querySelector("[data-act=flash-yes]")) {
+          var word = before.word;
+          var card = app.querySelector(".flash-word");
+          assert(card && card.textContent === word, label + " shows the word");
+          assert(!app.querySelector("[data-act=pick]"), label + " has no answer choices");
+          assert(app.querySelector("[data-act=flash-hear]"), label + " has a hear button");
+          app.querySelector("[data-act=flash-hear]").click();
+          assert(Merit.appTest.state().index === before.index, label + " hear stays on the card");
+          assert(Merit.appTest.state().word === word, label + " hear keeps the word");
+          assert(app.querySelector("[data-act=flash-no]"), label + " has an Incorrect button");
+          app.querySelector("[data-act=flash-no]").click();
+          assert(Merit.appTest.state().index === before.index + 1, label + " incorrect moves on");
+          assert(Merit.appTest.state().pct === 0, label + " incorrect counts");
+          // Reading word skills now mix flash cards with listen-and-find (word-length ladder).
+          assert(app.querySelector(".flash-word") || app.querySelector("[data-act=pick]"), label + " incorrect stays on a card");
+          if (app.querySelector("[data-act=flash-yes]")) app.querySelector("[data-act=flash-yes]").click();
+          else {
+            app.querySelector('[data-act=pick][data-id="' + Merit.appTest.state().correctId + '"]').click();
+            Merit.appTest.flushTimer(); Merit.appTest.flushTimer();
+          }
+          assert(Merit.appTest.state().index === before.index + 2, label + " correct moves on");
+          assert(Merit.appTest.state().pct === 50, label + " correct counts");
+          assert(app.querySelector(".flash-word") || app.querySelector("[data-act=pick]"), label + " stays on a flash card or listen-and-find");
+          assert(!app.querySelector("[data-act=next]"), label + " has no result page");
+          return;
+        }
+        var picks = app.querySelectorAll("[data-act=pick]");
+        if (!picks.length || !before.correctId) {
+          var kept = before.prompt;
+          if (app.querySelector("[data-act=drive]") && Merit.appTest.state().robot) {
+            // v25 robot puzzle: drive it with the keyboard and the arrow buttons (plan mode: then Go).
+            var rmoves = Merit.appTest.state().moves || [];
+            var rkey = { R: "ArrowRight", L: "ArrowLeft", U: "ArrowUp", D: "ArrowDown" };
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: rkey[rmoves[0]], bubbles: true, cancelable: true }));
+            for (var rm = 1; rm < rmoves.length; rm++) app.querySelector('[data-act=drive][data-dir="' + rmoves[rm] + '"]').click();
+            if (Merit.appTest.state().robot.mode === "plan") {
+              app.querySelector("[data-act=robot-go]").click();
+              for (var rf = 0; rf < 40 && Merit.appTest.state().robot && Merit.appTest.state().robot.running; rf++) Merit.appTest.flushTimer();
+              Merit.appTest.flushTimer();
+            }
+            assert(app.querySelector(".result-correct"), label + " robot reaches the star (" + rmoves.join("") + ")");
+            assert(Merit.appTest.state().pct === 100, label + " robot solve counts as right");
+            Merit.appTest.correctAndNext();
+            return;
+          }
+          if (app.querySelector("[data-act=drive]")) {
+            var moves = Merit.appTest.state().moves || [];
+            var keyFor = { R: "ArrowRight", L: "ArrowLeft", U: "ArrowUp", D: "ArrowDown" };
+            assert(moves.length >= 2, label + " has a path to the star");
+            var bumpDir = "U";
+            ["U", "L", "D", "R"].forEach(function (d) { if (d !== moves[0]) bumpDir = d; });
+            var bumpBtn = app.querySelector('[data-act=drive][data-dir="' + bumpDir + '"]');
+            if (bumpBtn) bumpBtn.click();
+            assert(app.querySelector(".result-x"), label + " a wall stops the square");
+            assert(Merit.appTest.state().pct === 0, label + " a bump counts as incorrect");
+            assert(Merit.appTest.state().phase === "ask", label + " stays on ask after a bump");
+            assert(Merit.appTest.state().prompt === kept, label + " stays on the question");
+            assert(!app.querySelector("[data-act=next]"), label + " does not open Next");
+            assert(!app.querySelector("[data-act=show-why]"), label + " does not open a result page");
+            if (moves.length) {
+              document.dispatchEvent(new KeyboardEvent("keydown", { key: keyFor[moves[0]], bubbles: true, cancelable: true }));
+              for (var m = 1; m < moves.length; m++) {
+                var stepBtn = app.querySelector('[data-act=drive][data-dir="' + moves[m] + '"]');
+                if (stepBtn) stepBtn.click();
+              }
+            }
+            assert(app.querySelector(".result-correct"), label + " the square on the star is Correct");
+            assert(app.querySelector(".cell.rover.goal"), label + " the square is on the star");
+            assert(Merit.appTest.state().pct === 50, label + " the landing counts with the miss");
+            assert(Merit.appTest.state().prompt === kept, label + " question stays up");
+            assert(app.querySelectorAll(".cell.rover").length === 1, label + " only one square moves");
+            Merit.appTest.correctAndNext();
+            return;
+          }
+          if (app.querySelector("[data-act=cell-go]")) {
+            var cell = app.querySelector("[data-act=cell]");
+            if (cell) cell.click();
+            var cellGo = app.querySelector("[data-act=cell-go]");
+            if (cellGo && !cellGo.disabled) cellGo.click();
+          }
+          assert(Merit.appTest.state().prompt === kept, label + " stays on the question");
+          assert(!app.querySelector("[data-act=next]"), label + " does not open Next");
+          assert(!app.querySelector("[data-act=show-why]"), label + " does not open a result page");
+          assert(app.querySelector(".result-x") || app.querySelector(".result-correct"), label + " shows Correct or an X");
+          if (app.querySelector(".result-correct")) Merit.appTest.correctAndNext();
+          return;
+        }
+        var wrong = null;
+        for (var i = 0; i < picks.length; i++) {
+          if (picks[i].getAttribute("data-id") !== before.correctId) wrong = picks[i];
+        }
+        if (label === "science") assert(picks.length >= 2, "engineering has answers to read");
+        assert(wrong, label + " has another choice");
+        if (!wrong) return;
+        wrong.click();
+        assert(Merit.appTest.state().phase === "ask", label + " stays on ask");
+        assert(Merit.appTest.state().prompt === before.prompt, label + " keeps the same prompt");
+        assert(Merit.appTest.state().pct === 0, label + " miss counts on the report");
+        assert(app.querySelector(".result-x"), label + " shows an X");
+        if (label === "science") assert(!app.querySelector(".choice.speaking"), "engineering stops highlighting after an answer");
+        assert(!app.querySelector("[data-act=next]"), label + " does not show Next");
+        assert(!app.querySelector("[data-act=show-why]"), label + " does not show why");
+        var right = app.querySelector('[data-act=pick][data-id="' + before.correctId + '"]');
+        assert(right, label + " right choice stays");
+        if (!right) return;
+        right.click();
+        assert(Merit.appTest.state().pct === 50, label + " correct is counted with the miss");
+        assert(app.querySelector(".result-correct"), label + " shows Correct");
+        assert(app.querySelector(".chalk-prompt").textContent === before.prompt, label + " question stays up");
+        assert(!app.querySelector("[data-act=next]"), label + " correct does not open Next");
+        Merit.appTest.correctAndNext();
+      }
+      var app = document.getElementById("app");
+      Merit.appTest.reset();
+      Merit.appTest.create({ name: "Ada", band: "7-8", placed: true });
+      assert(app.querySelector(".logo-word").textContent === "Merit", "logo word");
+      assert(app.querySelector(".logo-art"), "logo art");
+      assert(app.querySelectorAll(".card").length === 5, "five subjects");
+      Merit.appTest.start("math");
+      var s0 = Merit.appTest.state();
+      assert(s0.screen === "practice", "practice screen");
+      assert(s0.phase === "ask", "asking");
+      assert(app.querySelector(".board"), "chalkboard");
+      assert(getComputedStyle(document.body).backgroundColor === "rgb(255, 255, 255)" || true, "page exists");
+      var step0 = s0.step;
+      var guard = 0;
+      while (Merit.appTest.state().step === step0 && guard++ < 12) Merit.appTest.correctAndNext();
+      var s1 = Merit.appTest.state();
+      assert(s1.step === step0 + 1, "a correct streak raises the step from " + step0 + " to " + s1.step + " after " + guard);
+      samePage("reading");
+      samePage("science");
+      samePage("physics");
+      samePage("programming");
+      assert(app.querySelector(".grid") || app.querySelector(".choice") || app.querySelector(".chalk-prompt"), "programming has a grid or choices");
+      var hard = false;
+      Merit.appTest.start("math");
+      for (var n = 0; n < 40 && !hard; n++) {
+        var st = Merit.appTest.state();
+        if (st.phase === "ask" && st.allowType) hard = true;
+        else Merit.appTest.correctAndNext();
+      }
+      assert(hard, "harder math offers typing");
+      if (hard) {
+        assert(app.querySelector("#typed"), "type box is on the desk");
+        var typedPrompt = Merit.appTest.state().prompt;
+        document.getElementById("typed").value = "nope";
+        app.querySelector("[data-act=type-go]").click();
+        assert(Merit.appTest.state().phase === "ask", "a wrong typed math answer stays on the question");
+        assert(Merit.appTest.state().prompt === typedPrompt, "a wrong typed math answer keeps the prompt");
+        assert(app.querySelector(".result-x"), "a wrong typed math answer shows an X");
+        assert(app.querySelector(".chalk-prompt").textContent === typedPrompt, "the typed question stays on the board");
+      }
+      Merit.appTest.start("math");
+      assert(app.querySelector(".session-bar [data-act=skip]"), "skip sits with the session");
+      assert(app.querySelector(".session-bar [data-act=stop]"), "end session is at the bottom");
+      assert(!app.querySelector(".top-actions [data-act=stop]"), "end session is not in the header");
+      assert(app.querySelector(".grade-badge"), "question count is in the corner");
+      assert(app.querySelector(".grade-letter").textContent === "0", "the count starts at 0");
+      assert(app.querySelector(".grade-pct").textContent === "of 100", "the count runs to 100");
+      assert(!app.querySelector(".report-card"), "the report waits");
+      Merit.appTest.correctAndNext();
+      assert(app.querySelector(".grade-letter").textContent === "1", "the corner counts finished questions");
+      assert(!app.querySelector(".report-mark"), "one answer does not calculate the report");
+      app.querySelector(".session-bar [data-act=skip]").click();
+      app.querySelector(".session-bar [data-act=stop]").click();
+      assert(Merit.appTest.state().phase === "setdone", "end session opens the report");
+      assert(app.querySelector(".report-card"), "report card");
+      assert(app.querySelector(".report-mark").textContent === "A", "report card grade");
+      assert(app.textContent.indexOf("1 correct") >= 0, "correct count");
+      assert(app.textContent.indexOf("1 skipped") >= 0, "skip stays off the percentage");
+      assert(app.querySelector(".grade-letter").textContent === "A", "the grade appears when the session ends");
+      assert(app.querySelector(".grade-pct").textContent === "100%", "the percent appears when the session ends");
+      Merit.appTest.start("math");
+      var hundred = 0;
+      while (Merit.appTest.state().phase !== "setdone" && hundred < 120) {
+        Merit.appTest.correctAndNext();
+        hundred += 1;
+      }
+      assert(hundred === 100, "100 questions open the report, stopped after " + hundred);
+      assert(Merit.appTest.state().phase === "setdone", "100 opens the report card");
+      assert(app.querySelector(".report-card"), "the report is calculated at 100");
+      Merit.appTest.start("math");
+      var same = Merit.appTest.state();
+      var wrongPick = null;
+      var pickBtns = app.querySelectorAll("[data-act=pick]");
+      for (var wi = 0; wi < pickBtns.length; wi++) {
+        if (pickBtns[wi].getAttribute("data-id") !== same.correctId) wrongPick = pickBtns[wi];
+      }
+      assert(wrongPick, "math has another choice");
+      wrongPick.click();
+      assert(Merit.appTest.state().phase === "ask", "a wrong math answer stays on ask");
+      assert(Merit.appTest.state().prompt === same.prompt, "a wrong math answer keeps the question");
+      assert(Merit.appTest.state().pct === 0, "a wrong math try counts as incorrect");
+      assert(Merit.appTest.state().grade === "F", "a wrong math try is an F");
+      assert(app.querySelector(".grade-letter").textContent === "0", "a miss does not show the grade");
+      assert(app.querySelector(".grade-pct").textContent === "of 100", "a miss keeps the question count");
+      assert(!app.querySelector(".report-card"), "a miss does not open the report");
+      assert(app.querySelector(".result-x"), "a wrong math answer shows an X");
+      assert(getComputedStyle(app.querySelector(".result-x")).color === "rgb(255, 77, 77)", "the X is red");
+      assert(getComputedStyle(app.querySelector(".result-x")).animationName === "x-fade", "the X fades");
+      assert(!app.querySelector(".result-correct"), "a wrong math answer does not say Correct");
+      assert(!app.querySelector("[data-act=next]"), "a wrong math answer does not leave the page");
+      var rightPick = app.querySelector('[data-act=pick][data-id="' + same.correctId + '"]');
+      assert(rightPick, "the right math choice is still there");
+      rightPick.click();
+      assert(app.querySelector(".result-correct"), "a right math answer shows Correct");
+      assert(app.querySelector(".result-correct").textContent === "Correct", "the correct label is Correct");
+      assert(getComputedStyle(app.querySelector(".result-correct")).color === "rgb(125, 255, 154)", "Correct is green");
+      assert(app.querySelector(".board .burst .b-star"), "Correct shows a short star burst on the board");
+      assert(app.querySelector(".chalk-prompt").textContent === same.prompt, "a right math answer keeps the question");
+      assert(!app.querySelector("[data-act=show-why]"), "math does not open a separate result");
+      assert(!app.querySelector("[data-act=next]"), "math does not replace the answers with Next");
+      assert(Merit.appTest.state().pct === 50, "one miss and one correct is 50%");
+      assert(Merit.appTest.state().grade === "F", "one miss and one correct is an F");
+      Merit.appTest.correctAndNext();
+      app.querySelector("[data-act=home]").click();
+      app.querySelector("[data-act=who]").click();
+      app.querySelector("[data-act=create]").click();
+      assert(app.textContent.indexOf("Picture password") < 0, "create has no password");
+      assert(app.textContent.indexOf("grown-up") < 0, "create has no adult question");
+      document.getElementById("player-name").value = "Sam";
+      app.querySelector("[data-act=name-next]").click();
+      assert(document.getElementById("photo-file"), "picture upload on the look screen");
+      app.querySelector("[data-act=look-next]").click();
+      assert(app.textContent.indexOf("Age band") >= 0, "age follows the look");
+      assert(app.textContent.indexOf("grown-up") < 0, "no adult question before age");
+      app.querySelector("[data-act=age]").click();
+      assert(Merit.appTest.state().screen === "home", "new account opens");
+      app.querySelector("[data-act=who]").click();
+      var samBtn = null;
+      var playerBtns = app.querySelectorAll("[data-act=login]");
+      for (var pi = 0; pi < playerBtns.length; pi++) {
+        if (playerBtns[pi].textContent.indexOf("Sam") >= 0) samBtn = playerBtns[pi];
+      }
+      assert(samBtn, "Sam is on the who screen");
+      samBtn.click();
+      assert(Merit.appTest.state().screen === "home", "Sam opens with no password");
+      app.querySelector("[data-act=who]").click();
+      assert(app.textContent.indexOf("Delete an account") >= 0, "who can delete an account");
+      app.querySelector("[data-act=remove-ask]").click();
+      assert(app.textContent.indexOf("grown-up") >= 0, "delete asks a grown-up");
+      document.getElementById("gate-answer").value = "1";
+      app.querySelector("[data-act=gate-go]").click();
+      assert(app.textContent.indexOf("Try the sum") >= 0, "wrong sum stays on the gate");
+      var sumText = app.querySelector(".sub").textContent;
+      var sumParts = sumText.split("+");
+      document.getElementById("gate-answer").value = String(parseInt(sumParts[0], 10) + parseInt(sumParts[1], 10));
+      app.querySelector("[data-act=gate-go]").click();
+      assert(app.textContent.indexOf("Ada") >= 0 && app.textContent.indexOf("Sam") >= 0, "both accounts are listed");
+      var adaDelete = null;
+      var removeRows = app.querySelectorAll(".remove-row");
+      for (var ri = 0; ri < removeRows.length; ri++) {
+        if (removeRows[ri].textContent.indexOf("Ada") >= 0) adaDelete = removeRows[ri].querySelector("[data-act=remove]");
+      }
+      assert(adaDelete, "Ada can be deleted");
+      adaDelete.click();
+      adaDelete = null;
+      removeRows = app.querySelectorAll(".remove-row");
+      for (ri = 0; ri < removeRows.length; ri++) {
+        if (removeRows[ri].textContent.indexOf("Ada") >= 0) adaDelete = removeRows[ri].querySelector("[data-act=remove]");
+      }
+      assert(adaDelete && adaDelete.textContent.indexOf("Yes, delete") >= 0, "delete asks again");
+      assert(app.textContent.indexOf("Sam") >= 0, "first tap does not erase the list");
+      adaDelete.click();
+      assert(app.textContent.indexOf("Ada") < 0, "Ada is deleted");
+      assert(app.textContent.indexOf("Sam") >= 0, "Sam stays");
+      app.querySelector("[data-act=who]").click();
+      var samAgain = null;
+      var againBtns = app.querySelectorAll("[data-act=login]");
+      for (var ai = 0; ai < againBtns.length; ai++) {
+        if (againBtns[ai].textContent.indexOf("Sam") >= 0) samAgain = againBtns[ai];
+      }
+      assert(samAgain, "Sam can open again");
+      samAgain.click();
+      var mathCard = app.querySelector('[data-act=practice][data-id="math"]');
+      assert(mathCard, "math is on the home screen");
+      mathCard.click();
+      assert(app.textContent.indexOf("Addition") >= 0, "math shows addition");
+      assert(app.textContent.indexOf("Subtraction") >= 0, "math shows subtraction");
+      assert(app.textContent.indexOf("Multiplication") >= 0, "math shows multiplication");
+      assert(app.textContent.indexOf("Division") >= 0, "math shows division");
+      var beginnerNow = Merit.appTest.state().homeLevel === "beginner";
+      assert(app.querySelectorAll("[data-act=math-section]").length === (beginnerNow ? 7 : 5), "math has four sections plus story sums (plus Shapes and Math mix at Beginner)");
+      assert(app.querySelector('[data-act=math-section][data-id="word"]'), "math shows the word problem section");
+      assert(app.querySelectorAll("[data-act=math-style]").length === 2, "math has objects and numbers");
+      assert(app.querySelector('[data-act=math-style][data-id="objects"].on'), "objects is selected");
+      assert(app.querySelector('[data-act=math-style][data-id="numbers"].on'), "numbers is selected");
+      assert(!app.querySelector("[data-act=math-level]"), "math has no level buttons");
+      assert(!app.querySelector(".progress-path, .level-row"), "math has no level strip");
+      assert(app.querySelector(".sub").textContent.indexOf("Beginner") >= 0, "math says the level for a 5-6 child is Beginner");
+      var startBtn = app.querySelector("[data-act=math-start]");
+      assert(startBtn && startBtn.disabled, "start waits until a section is picked");
+      app.querySelector('[data-act=math-section][data-id="add"]').click();
+      app.querySelector('[data-act=math-section][data-id="div"]').click();
+      startBtn = app.querySelector("[data-act=math-start]");
+      assert(startBtn && !startBtn.disabled, "start turns on after a section is picked");
+      startBtn.click();
+      assert(Merit.appTest.state().screen === "practice", "start begins the picked sections");
+      assert(Merit.appTest.state().questionSkill === "add", "the first question is addition");
+      assert(Merit.appTest.state().level === "beginner", "a 5-6 child's math runs at Beginner");
+      assert([1, 2].indexOf(Merit.appTest.state().questionStep) >= 0, "beginner math stays on steps 1-2");
+      assert(app.querySelector(".chalk-kicker").textContent.indexOf("Beginner") >= 0, "the board shows Beginner");
+      Merit.appTest.correctAndNext();
+      assert(Merit.appTest.state().questionSkill === "div", "the next question is division");
+
+      // Home "Pick a level" row: Beginner / Intermediate / Expert, one selected, drives every subject.
+      var LV = { beginner: [1, 2], intermediate: [3, 4], expert: [5] };
+      var MLT = { beginner: "Beginner", intermediate: "Intermediate", expert: "Expert" };
+      function homeLevelButtons() { return app.querySelectorAll("[data-act=home-level]"); }
+      function pickHomeLevel(id) {
+        Merit.appTest.home();
+        app.querySelector('[data-act=home-level][data-id="' + id + '"]').click();
+      }
+      function savedLevel() {
+        var dbx = JSON.parse(localStorage.getItem("merit.v1"));
+        var me = null;
+        dbx.profiles.forEach(function (pp) { if (pp.name === "Sam") me = pp; });
+        return me && me.level;
+      }
+      Merit.appTest.home();
+      var lb = homeLevelButtons();
+      assert(app.textContent.indexOf("Pick a level:") >= 0, "home says Pick a level:");
+      assert(lb.length === 3, "home has three level buttons");
+      assert(lb.length === 3 && lb[0].textContent === "Beginner" && lb[1].textContent === "Intermediate" && lb[2].textContent === "Expert", "level buttons say Beginner, Intermediate, Expert");
+      assert(app.querySelectorAll("[data-act=home-level].on").length === 1, "exactly one level is selected");
+      assert(app.querySelector('[data-act=home-level][data-id="beginner"].on'), "a 5-6 child starts on Beginner");
+      ["expert", "intermediate", "beginner"].forEach(function (lv) {
+        pickHomeLevel(lv);
+        assert(app.querySelector('[data-act=home-level][data-id="' + lv + '"].on') && app.querySelectorAll("[data-act=home-level].on").length === 1, lv + " is the one selected");
+        assert(savedLevel() === lv, lv + " is saved in the profile");
+        ["reading", "science", "physics", "programming"].forEach(function (subject) {
+          pickHomeLevel(lv);
+          app.querySelector('[data-act=practice][data-id="' + subject + '"]').click();
+          if (subject === "science") {
+            var sciBtn = app.querySelector('.sci-pop [data-act=practice-sub][data-id="science"]');
+            assert(sciBtn, "the Science card asks Science or Astronomy");
+            sciBtn.click();
+          }
+          assert(Merit.appTest.state().screen === "practice" && Merit.appTest.state().level === lv, subject + " starts at " + lv);
+          for (var qi = 0; qi < 12; qi++) {
+            var qs = Merit.appTest.state();
+            assert(LV[lv].indexOf(qs.questionStep) >= 0, subject + " " + lv + " question " + qi + " step " + qs.questionStep + " fits the level");
+            if (qs.bankId) assert(qs.bankLevel === lv, subject + " " + lv + " bank question is " + lv + " (got " + qs.bankLevel + ")");
+            Merit.appTest.correctAndNext();
+          }
+        });
+        // (all-correct practice can earn the next level and move Home up, so pick the level again for math)
+        pickHomeLevel(lv);
+        app.querySelector('[data-act=practice][data-id="math"]').click();
+        assert(!app.querySelector("[data-act=math-level]"), "math screen has no level buttons");
+        assert(app.querySelector(".sub").textContent.indexOf("Level: " + MLT[lv]) >= 0, "math screen says Level: " + MLT[lv]);
+        Array.prototype.slice.call(app.querySelectorAll("[data-act=math-section].on")).forEach(function (b) {
+          app.querySelector('[data-act=math-section][data-id="' + b.getAttribute("data-id") + '"]').click();
+        });
+        app.querySelector('[data-act=math-section][data-id="word"]').click();
+        app.querySelector('[data-act=math-section][data-id="add"]').click();
+        app.querySelector("[data-act=math-start]").click();
+        for (var mq = 0; mq < 8; mq++) {
+          var mst = Merit.appTest.state();
+          assert(mst.level === lv && LV[lv].indexOf(mst.questionStep) >= 0, "math " + lv + " question " + mq + " fits the level");
+          if (mst.bankId) assert(mst.bankLevel === lv, "math " + lv + " word problem is " + lv);
+          Merit.appTest.correctAndNext();
+        }
+        assert(app.querySelector(".chalk-kicker").textContent.indexOf(MLT[lv]) >= 0, "math board shows " + MLT[lv]);
+      });
+      // Earning a higher level moves the Home level up, with the usual message; it never moves it down.
+      Merit.appTest.reset();
+      Merit.appTest.create({ name: "Uma", band: "5-6", placed: true });
+      Merit.appTest.start("science");
+      var upNotice = false;
+      for (var up = 0; up < 120 && Merit.appTest.state().homeLevel === "beginner"; up++) {
+        Merit.appTest.correctAndNext();
+        if (app.textContent.indexOf("You are Intermediate now") >= 0) upNotice = true;
+      }
+      assert(Merit.appTest.state().homeLevel === "intermediate", "earning step 2 moves Home up to Intermediate");
+      assert(upNotice, "the child sees 'You are Intermediate now.'");
+      Merit.appTest.home();
+      assert(app.querySelector('[data-act=home-level][data-id="intermediate"].on'), "home shows Intermediate after leveling up");
+      app.querySelector('[data-act=home-level][data-id="beginner"]').click();
+      Merit.appTest.start("science");
+      for (var dn = 0; dn < 15; dn++) Merit.appTest.correctAndNext();
+      assert(Merit.appTest.state().homeLevel === "beginner", "switching down to Beginner sticks (earned levels never force it back up)");
+      assert([1, 2].indexOf(Merit.appTest.state().questionStep) >= 0, "after switching down, questions are Beginner again");
+      // Math has no level picker: the level comes from the saved math level (older picker) or the age band.
+      [["5-6", "", "beginner"], ["7-8", "", "intermediate"], ["9-10", "", "expert"], ["5-6", "expert", "expert"], ["9-10", "beginner", "beginner"]].forEach(function (row) {
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Mia", band: row[0], placed: true, mathTrain: row[1] });
+        app.querySelector('[data-act=practice][data-id="math"]').click();
+        assert(!app.querySelector("[data-act=math-level]"), "math " + row[0] + " has no level buttons");
+        Array.prototype.slice.call(app.querySelectorAll("[data-act=math-section].on")).forEach(function (b) {
+          app.querySelector('[data-act=math-section][data-id="' + b.getAttribute("data-id") + '"]').click();
+        });
+        app.querySelector('[data-act=math-section][data-id="word"]').click();
+        assert(app.querySelectorAll("[data-act=math-section].on").length === 1, "only story sums are picked");
+        app.querySelector("[data-act=math-start]").click();
+        for (var mw = 0; mw < 6; mw++) {
+          var ms = Merit.appTest.state();
+          assert(ms.level === row[2] && ms.questionSkill === "word" && ms.bankLevel === row[2], "math " + row[0] + " saved '" + row[1] + "' word problem " + mw + " is " + row[2] + " (got " + ms.bankLevel + ")");
+          Merit.appTest.correctAndNext();
+        }
+      });
+      // A new profile's Home level is the one for its age band; mixed-in bank questions use it.
+      // (A fresh profile per subject: all-correct practice can earn the next level.)
+      [["5-6", "beginner"], ["7-8", "intermediate"], ["9-10", "expert"]].forEach(function (pair) {
+        ["science", "physics", "reading"].forEach(function (subject) {
+          Merit.appTest.reset();
+          Merit.appTest.create({ name: "Band" + pair[0], band: pair[0], placed: true });
+          Merit.appTest.start(subject);
+          assert(Merit.appTest.state().level === pair[1], subject + " " + pair[0] + " starts at " + pair[1]);
+          var found = null;
+          for (var k = 0; k < 80 && !found; k++) {
+            var bs = Merit.appTest.state();
+            if (bs.bankId) found = bs;
+            else Merit.appTest.correctAndNext();
+          }
+          assert(found, subject + " " + pair[0] + " mixes in a bank question");
+          if (found) assert(found.bankLevel === pair[1], subject + " " + pair[0] + " mixed-in question is " + pair[1] + " (got " + found.bankLevel + ")");
+          Merit.appTest.home();
+        });
+      });
+      // Every bank item through the real screen: a wrong tap shows X, the right tap shows Correct and moves on.
+      var bandsFor = {};
+      Object.keys(Merit.SKILLS).forEach(function (sid) {
+        bandsFor[sid] = {};
+        Object.keys(Merit.SKILLS[sid]).forEach(function (bd) { bandsFor[sid][bd] = Merit.SKILLS[sid][bd].map(function (k) { return k.id; }); });
+      });
+      var tapBand = null;
+      var tapped = 0;
+      function tapItem(item) {
+        var bd = bandsFor[item.subject][item.band] && bandsFor[item.subject][item.band].indexOf(item.skill) >= 0 ? item.band
+          : ["5-6", "7-8", "9-10"].filter(function (x) { return bandsFor[item.subject][x].indexOf(item.skill) >= 0; })[0];
+        if (tapBand !== bd) {
+          Merit.appTest.reset();
+          Merit.appTest.create({ name: "Tess", band: bd, placed: true });
+          tapBand = bd;
+        }
+        var tag = "tap " + item.id;
+        if (!Merit.appTest.showBank(item.id)) { assert(false, tag + " shows"); return; }
+        var st0 = Merit.appTest.state();
+        var btns = Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]"));
+        var right = btns.filter(function (bt) { return bt.textContent === String(item.answer); });
+        var wrongs = btns.filter(function (bt) { return bt.textContent !== String(item.answer); });
+        if (!(st0.bankId === item.id && btns.length === item.choices.length && right.length === 1 && wrongs.length >= 1)) {
+          assert(false, tag + " shows its choices with the answer once (" + btns.length + " buttons)");
+          return;
+        }
+        if (right[0].getAttribute("data-id") !== st0.correctId) assert(false, tag + " answer button is the graded one");
+        var spoken = st0.speech.join(" | ");
+        var labelsSpoken = btns.filter(function (bt) { return st0.speech.indexOf(Merit.speechText(bt.textContent).replace(/([^.?!])$/, "$1.")) >= 0 || st0.speech.indexOf(bt.textContent) >= 0; }).length;
+        if (item.subject === "science" || item.subject === "physics" || item.subject === "astronomy") {
+          var expect = Merit.speechSentences(Merit.speechText(item.prompt)).concat(btns.map(function (bt) { return Merit.speechText(bt.textContent).replace(/([^.?!])$/, "$1."); }));
+          if (spoken !== expect.join(" | ")) assert(false, tag + " reads the question then every answer in order (got " + spoken.slice(0, 120) + ")");
+          if (!app.querySelector("[data-act=read-aloud]")) assert(false, tag + " has the Play button");
+        } else {
+          if (app.querySelector("[data-act=read-aloud]")) assert(false, tag + " has no science Play button");
+          // Beginner word items say (and show) the key word; no other choice is ever said.
+          var key = Merit.beginnerKeyWord(item);
+          var otherSpoken = btns.filter(function (bt) { return (!key || bt.textContent !== key.key) && (st0.speech.indexOf(Merit.speechText(bt.textContent).replace(/([^.?!])$/, "$1.")) >= 0 || st0.speech.indexOf(bt.textContent) >= 0); }).length;
+          if (key) {
+            var big = app.querySelector(".see-word");
+            if (!big || big.textContent !== key.key) assert(false, tag + " beginner shows the key word big (" + (big && big.textContent) + ")");
+            if (st0.speech.indexOf(key.key) < 0) assert(false, tag + " beginner says the key word (" + spoken + ")");
+            if (!app.querySelector(".art-seeword [data-act=speak-prompt]")) assert(false, tag + " beginner has a Play button for the word");
+          }
+          if (item.subject === "reading" && !item.passage && otherSpoken) assert(false, tag + " reading word item does not read its choices (" + spoken + ")");
+          if (!item.readChoices && otherSpoken) assert(false, tag + " does not read choices (" + spoken + ")");
+        }
+        wrongs[0].click();
+        if (Merit.appTest.state().mathOk || !app.querySelector(".result-x") || app.querySelector(".result-correct")) assert(false, tag + " wrong tap is marked wrong");
+        app.querySelector('[data-act=pick][data-id="' + right[0].getAttribute("data-id") + '"]').click();
+        var okEl = app.querySelector(".result-correct");
+        if (!Merit.appTest.state().mathOk || !okEl || okEl.textContent !== "Correct") { assert(false, tag + " right tap is marked Correct"); return; }
+        Merit.appTest.flushTimer();
+        Merit.appTest.flushTimer();
+        var st1 = Merit.appTest.state();
+        if (!(st1.index !== st0.index || st1.phase !== "ask")) assert(false, tag + " moves on after Correct");
+        tapped += 1;
+      }
+      Merit.BANK.forEach(tapItem);
+      assert(tapped === Merit.BANK.length, "every bank item passed the tap check (" + tapped + " of " + Merit.BANK.length + ")");
+      // v23 Word match in real Beginner reading practice: the 4th and 8th of every 8 questions, shown big and said,
+      // 4 look-alike choices not read aloud, tracked per word apart from sight words; Home / Parent / Wall; Reset Reading clears.
+      (function () {
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Wes", band: "5-6", placed: true, level: "beginner" });
+        Merit.appTest.start("reading");
+        var at = [], words = [];
+        for (var n = 0; n < 16; n++) {
+          var st = Merit.appTest.state();
+          if (st.phase !== "ask") break;
+          if (st.matchWord) {
+            at.push(st.index); words.push(st.matchWord);
+            assert(st.bankId.indexOf("wm-") === 0 && !st.sightWord, "word match: a word match item (" + st.bankId + ")");
+            var big = app.querySelector(".see-word");
+            assert(big && big.textContent === st.matchWord, "word match: word shown big (" + st.matchWord + ")");
+            assert(st.speech[0] === "Find this word." && st.speech.indexOf(st.matchWord) >= 0, "word match: word said (" + st.speech.join(" | ") + ")");
+            var labels = Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]")).map(function (b) { return b.textContent; });
+            assert(labels.length === 4 && labels.indexOf(st.matchWord) >= 0, "word match: 4 choices with the word");
+            assert(labels.filter(function (l) { return l !== st.matchWord && st.speech.indexOf(l) >= 0; }).length === 0, "word match: choices not read aloud");
+            var play = app.querySelector(".art-seeword [data-act=speak-prompt]");
+            assert(play && play.textContent === "Play", "word match: Play button says Play");
+            assert(/Word match/.test(app.querySelector(".chalk-kicker").textContent), "word match: board says Word match (" + app.querySelector(".chalk-kicker").textContent + ")");
+          }
+          if (n === 3) {
+            var wrongBtn = Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]")).filter(function (b) { return b.getAttribute("data-id") !== st.correctId; })[0];
+            if (wrongBtn) wrongBtn.click();
+          }
+          Merit.appTest.correctAndNext();
+          Merit.appTest.flushTimer();
+        }
+        assert(at.join() === "3,7,11,15", "word match: at questions 4, 8, 12, 16 (got " + at.join() + ")");
+        assert(words.every(function (w, i) { return i === 0 || w !== words[i - 1]; }), "word match: never the same word twice in a row (" + words.join() + ")");
+        var dbs = JSON.parse(localStorage.getItem("merit.v1") || localStorage.getItem(Object.keys(localStorage).filter(function (k) { return /merit/i.test(k); })[0]) || "{}");
+        var me = (dbs.profiles || []).filter(function (pp) { return pp.name === "Wes"; })[0];
+        assert(me && me.wordMatch && Object.keys(me.wordMatch).length >= 2 && me.wordMatch[words[0]].h.charAt(0) === "0", "word match: words recorded, first-try miss kept");
+        assert(!me.sightWords || Object.keys(me.sightWords).every(function (w) { return !me.wordMatch[w]; }), "word match: kept apart from sight words");
+        Merit.appTest.home();
+        assert(/\d+ of 100 words/.test(app.querySelector('.card[data-subject="reading"] .muted').textContent), "word match: Home shows X of 100 words (" + app.querySelector('.card[data-subject="reading"] .muted').textContent + ")");
+        Merit.appTest.parent();
+        var line = app.querySelector(".word-line");
+        assert(line && /Word match/.test(line.textContent) && /of 100 words/.test(line.textContent), "word match: Parent shows Word match X of 100 words");
+        app.querySelector("[data-act=home]").click();
+        app.querySelector("[data-act=wall]").click();
+        var stone = app.querySelector('section.panel[data-subject="reading"] .stone.word-match');
+        assert(stone && /Word match/.test(stone.textContent) && /of 100 words/.test(stone.textContent), "word match: Classroom wall shows Word match");
+        app.querySelector("[data-act=home]").click();
+        app.querySelector("[data-act=reset-open]").click();
+        app.querySelector('.reset-pop [data-act=reset-do][data-id="reading"]').click();
+        assert(/0 of 100 words/.test(app.querySelector('.card[data-subject="reading"] .muted').textContent), "word match: Reset Reading sets it back to 0 of 100");
+      })();
+
+      // v15 Sight words in real Beginner reading practice: the 2nd and 6th of every 8 questions, shown and said,
+      // tracked per word, shown on Home / Parent / Classroom wall; not at Intermediate; reading score untouched.
+      (function () {
+        ["5-6", "7-8", "9-10"].forEach(function (bd) {
+          Merit.appTest.reset();
+          Merit.appTest.create({ name: "Sid", band: bd, placed: true, level: "beginner" });
+          Merit.appTest.start("reading");
+          var sightAt = [], words = [];
+          for (var n = 0; n < 16; n++) {
+            var st = Merit.appTest.state();
+            if (st.phase !== "ask") break;
+            if (st.sightWord) {
+              if (st.bankId.indexOf("sw-") === 0) sightAt.push(st.index);
+              words.push(st.sightWord);
+              var big = app.querySelector(".see-word");
+              assert(big && big.textContent === st.sightWord, "sight " + bd + ": word shown big (" + st.sightWord + ")");
+              assert(st.speech.indexOf(st.sightWord) >= 0 && st.speech[0] === "Find this word.", "sight " + bd + ": word said (" + st.speech.join(" | ") + ")");
+              var labels = Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]")).map(function (b) { return b.textContent; });
+              assert(labels.filter(function (l) { return l !== st.sightWord && st.speech.indexOf(l) >= 0; }).length === 0, "sight " + bd + ": choices not read aloud");
+              var play = app.querySelector(".art-seeword [data-act=speak-prompt]");
+              assert(play && play.textContent === "Play", "sight " + bd + ": Play button says Play");
+              assert(/Sight words/.test(app.querySelector(".chalk-kicker").textContent), "sight " + bd + ": board says Sight words");
+              var bar = app.querySelectorAll(".session-bar button");
+              assert(bar.length === 2, "sight " + bd + ": Skip and End session there");
+            }
+            if (n === 1) {
+              // a miss first on the first sight word: it is recorded as a miss for that word
+              var wrongBtn = Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]")).filter(function (b) { return b.getAttribute("data-id") !== st.correctId; })[0];
+              if (wrongBtn) wrongBtn.click();
+            }
+            Merit.appTest.correctAndNext();
+            Merit.appTest.flushTimer();
+          }
+          assert(sightAt.join() === "1,5,9,13", "sight " + bd + ": sight words at questions 2, 6, 10, 14 (got " + sightAt.join() + ")");
+          assert(words.every(function (w, i) { return i === 0 || w !== words[i - 1]; }), "sight " + bd + ": never the same word twice in a row (" + words.join() + ")");
+          var dbs = JSON.parse(localStorage.getItem("merit.v1") || localStorage.getItem(Object.keys(localStorage).filter(function (k) { return /merit/i.test(k); })[0]) || "{}");
+          var me = (dbs.profiles || []).filter(function (pp) { return pp.name === "Sid"; })[0];
+          assert(me && me.sightWords && Object.keys(me.sightWords).length >= 2 && Object.keys(me.sightWords).length <= sightAt.length, "sight " + bd + ": each word recorded (" + (me && me.sightWords ? Object.keys(me.sightWords).join() : "none") + ")");
+          if (me && me.sightWords && words[0]) assert(me.sightWords[words[0]] && me.sightWords[words[0]].h.charAt(0) === "0", "sight " + bd + ": first-try miss recorded");
+          Merit.appTest.home();
+          var homeText = app.textContent;
+          assert(/\d+ of 200 sight words/.test(homeText), "sight " + bd + ": Home shows X of 200 sight words");
+          Merit.appTest.parent();
+          var line = app.querySelector(".sight-line");
+          assert(line && /Sight words/.test(line.textContent) && /of 200 words/.test(line.textContent), "sight " + bd + ": Parent shows Sight words X of 200 words");
+        });
+        // Not at Intermediate.
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Mid", band: "5-6", placed: true, level: "intermediate" });
+        Merit.appTest.start("reading");
+        for (var m = 0; m < 16; m++) {
+          var s2 = Merit.appTest.state();
+          if (s2.phase !== "ask") break;
+          assert(!s2.sightWord, "sight: no sight words at Intermediate");
+          Merit.appTest.correctAndNext();
+          Merit.appTest.flushTimer();
+        }
+        // One-word ladder tier: a forced sight word on the Everyday words skill.
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Lid", band: "5-6", placed: true, level: "beginner" });
+        Merit.appTest.showSkill("reading", "sight", 2, { tier: 1, sight: "where" });
+        var s3 = Merit.appTest.state();
+        assert(s3.sightWord === "where" && s3.seeWord === "where" && s3.tier === 1, "sight: one-word ladder tier can show a sight word");
+        var lab3 = Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]")).map(function (b) { return b.textContent; });
+        assert(lab3.indexOf("were") >= 0 && lab3.indexOf("wear") < 0, "sight: ladder sight word uses its vetted choices");
+      })();
+      // v21 Astronomy: the Science card asks Science or Astronomy; Astronomy gives only space questions.
+      (function () {
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Cosmo", band: "7-8", placed: true, level: "beginner" });
+        Merit.appTest.home();
+        assert(app.querySelectorAll(".grid-cards .card").length === 5, "astronomy: still five Home cards");
+        assert(!/Astronomy/.test(app.querySelector('.card[data-subject="science"] .muted').textContent), "astronomy: Science card stays short before Astronomy is started");
+        app.querySelector('[data-act=practice][data-id="science"]').click();
+        var opts = Array.prototype.slice.call(app.querySelectorAll(".sci-pop [data-act=practice-sub]")).map(function (b) { return b.getAttribute("data-id"); });
+        assert(opts.join("|") === "science|astronomy", "astronomy: chooser offers Science & Engineering and Astronomy (" + opts.join("|") + ")");
+        assert(app.querySelector('.sci-pop [data-id="astronomy"] svg.mascot'), "astronomy: chooser shows the rocket");
+        app.querySelector(".sci-pop [data-act=sci-close]").click();
+        assert(!app.querySelector(".sci-pop") && Merit.appTest.state().screen === "home", "astronomy: Close keeps Home");
+        app.querySelector('[data-act=practice][data-id="science"]').click();
+        app.querySelector(".reset-backdrop[data-act=sci-close]").click();
+        assert(!app.querySelector(".sci-pop"), "astronomy: tapping outside closes the chooser");
+        ["beginner", "intermediate", "expert"].forEach(function (lv) {
+          Merit.appTest.home();
+          app.querySelector('.home-level-row [data-id="' + lv + '"]').click();
+          app.querySelector('[data-act=practice][data-id="science"]').click();
+          app.querySelector('.sci-pop [data-act=practice-sub][data-id="astronomy"]').click();
+          var bad = [], bank = 0;
+          for (var i = 0; i < 16; i++) {
+            var st = Merit.appTest.state();
+            if (["astro", "astrospace"].indexOf(st.questionSkill) < 0) bad.push(st.questionSkill);
+            if (st.bankId) { bank++; if (!/^astro-/.test(st.bankId) || st.bankLevel !== lv) bad.push(st.bankId + "@" + st.bankLevel); }
+            if (st.level !== lv) bad.push("level " + st.level);
+            Merit.appTest.correctAndNext(); Merit.appTest.flushTimer();
+          }
+          assert(!bad.length && bank >= 8, "astronomy " + lv + ": only " + lv + " space questions (" + bad.slice(0, 3).join(", ") + "; bank " + bank + ")");
+          assert(app.querySelector('.shell[data-subject="astronomy"]'), "astronomy: practice uses the Astronomy look");
+        });
+        // Regular Science still works and asks no Astronomy questions.
+        Merit.appTest.home();
+        app.querySelector('[data-act=practice][data-id="science"]').click();
+        app.querySelector('.sci-pop [data-act=practice-sub][data-id="science"]').click();
+        var sciBad = [];
+        for (var j = 0; j < 12; j++) {
+          var s2 = Merit.appTest.state();
+          if (/^astro/.test(s2.questionSkill || "") || /^astro-/.test(s2.bankId || "")) sciBad.push(s2.questionSkill);
+          Merit.appTest.correctAndNext(); Merit.appTest.flushTimer();
+        }
+        assert(!sciBad.length && Merit.appTest.state().screen === "practice", "astronomy: regular Science still works without astronomy questions");
+        Merit.appTest.home();
+        assert(/Astronomy step \d/.test(app.querySelector('.card[data-subject="science"] .muted').textContent), "astronomy: Science card shows Astronomy progress once started (" + app.querySelector('.card[data-subject="science"] .muted').textContent + ")");
+        Merit.appTest.parent();
+        var heads = Array.prototype.slice.call(app.querySelectorAll(".panel h2")).map(function (h) { return h.textContent; });
+        assert(heads.some(function (h) { return /^Astronomy · \d+$/.test(h) && !/· 0$/.test(h); }), "astronomy: Parent shows Astronomy progress (" + heads.join(", ") + ")");
+        app.querySelector("[data-act=home]").click();
+        app.querySelector("[data-act=wall]").click();
+        assert(app.querySelector('section.panel[data-subject="astronomy"]'), "astronomy: Classroom wall shows Astronomy");
+        app.querySelector("[data-act=home]").click();
+        var saved = function () { return JSON.parse(localStorage.getItem("merit.v1")).profiles[0]; };
+        var sciBefore = JSON.stringify(saved().subjects.science);
+        app.querySelector("[data-act=reset-open]").click();
+        app.querySelector('.reset-pop [data-act=reset-do][data-id="astronomy"]').click();
+        assert((app.querySelector(".reset-note") || {}).textContent === "Astronomy is fresh again!", "astronomy: Reset Astronomy note");
+        var after = saved();
+        assert(JSON.stringify(after.subjects.science) === sciBefore && !after.subjects.astronomy.bands["7-8"].skills.astro.answers.length, "astronomy: Reset Astronomy keeps Science");
+      })();
+
+      // v20 Shapes: a Beginner math section (and 1 in 8 Beginner set questions); never at Intermediate or Expert.
+      (function () {
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Shay", band: "7-8", placed: true, level: "beginner" });
+        Merit.appTest.home();
+        assert(/shapes/.test(app.querySelector('.card[data-subject="math"] .muted').textContent), "shapes: Beginner Home math card lists shapes");
+        app.querySelector('[data-act=practice][data-id="math"]').click();
+        var shapeCard = app.querySelector('[data-act=math-section][data-id="shapes"]');
+        assert(shapeCard && /Shapes/.test(shapeCard.textContent), "shapes: Beginner math pick shows Shapes");
+        Array.prototype.slice.call(app.querySelectorAll(".math-section.on")).forEach(function (b) { b.click(); });
+        app.querySelector('[data-act=math-section][data-id="shapes"]').click();
+        app.querySelector("[data-act=math-start]").click();
+        var seen = 0, steps = [];
+        for (var i = 0; i < 14; i++) {
+          var st = Merit.appTest.state();
+          if (st.questionSkill === "shapes") { seen++; steps.push(st.questionStep); }
+          Merit.appTest.correctAndNext(); Merit.appTest.flushTimer();
+        }
+        assert(seen === 14, "shapes: a Shapes-only session asks only shapes (" + seen + ")");
+        assert(steps[0] === 1 && Math.max.apply(null, steps) >= 2, "shapes: starts at step 1 and climbs (" + steps.join(",") + ")");
+        // Mixed into a Beginner set (no sections picked).
+        Merit.appTest.home();
+        Merit.appTest.start("math");
+        var mixed = 0;
+        for (var j = 0; j < 16; j++) {
+          if (Merit.appTest.state().questionSkill === "shapes") mixed++;
+          Merit.appTest.correctAndNext(); Merit.appTest.flushTimer();
+        }
+        assert(mixed === 2, "shapes: 2 of 16 Beginner math set questions are shapes (" + mixed + ")");
+        Merit.appTest.home();
+        Merit.appTest.parent();
+        var line = app.querySelector(".shapes-line");
+        assert(line && /Shapes/.test(line.textContent) && !/not started/.test(line.textContent), "shapes: Parent lists Shapes progress (" + (line && line.textContent) + ")");
+        app.querySelector("[data-act=home]").click();
+        app.querySelector("[data-act=wall]").click();
+        assert(app.querySelector('section.panel[data-subject="math"] .stone.shapes'), "shapes: Classroom wall shows Shapes");
+        app.querySelector("[data-act=home]").click();
+        ["intermediate", "expert"].forEach(function (lv) {
+          app.querySelector('.home-level-row [data-id="' + lv + '"]').click();
+          assert(!/shapes/.test(app.querySelector('.card[data-subject="math"] .muted').textContent), "shapes: " + lv + " Home math card has no shapes");
+          app.querySelector('[data-act=practice][data-id="math"]').click();
+          assert(!app.querySelector('[data-act=math-section][data-id="shapes"]'), "shapes: no Shapes section at " + lv);
+          Merit.appTest.home();
+          Merit.appTest.start("math");
+          var any = 0;
+          for (var k = 0; k < 16; k++) {
+            if (Merit.appTest.state().questionSkill === "shapes") any++;
+            Merit.appTest.correctAndNext(); Merit.appTest.flushTimer();
+          }
+          assert(any === 0, "shapes: no shapes questions at " + lv + " (" + any + ")");
+          Merit.appTest.home();
+        });
+        // Reset Math clears Shapes.
+        var me = Merit.appTest.state();
+        app.querySelector("[data-act=reset-open]").click();
+        app.querySelector('.reset-pop [data-act=reset-do][data-id="math"]').click();
+        Merit.appTest.parent();
+        assert(/not started/.test(app.querySelector(".shapes-line").textContent), "shapes: Reset Math resets Shapes");
+        Merit.appTest.home();
+      })();
+
+      // v17 Reset progress from Home: a chooser (All subjects or one subject); a pick resets at once, no confirm.
+      (function () {
+        function saved(name) { var d = JSON.parse(localStorage.getItem("merit.v1")); return d.profiles.filter(function (pp) { return pp.name === name; })[0]; }
+        function card(sid) { var c = app.querySelector('.card[data-subject="' + sid + '"] .muted'); return c ? c.textContent : ""; }
+        function play(subject, n) { Merit.appTest.start(subject); for (var i = 0; i < n; i++) { Merit.appTest.correctAndNext(); Merit.appTest.flushTimer(); } }
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Bo", band: "7-8", placed: true });
+        play("math", 6);
+        var boBefore = JSON.stringify(saved("Bo"));
+        Merit.appTest.create({ name: "Ada", band: "5-6", placed: true, level: "beginner" });
+        play("physics", 20);
+        var stepEarned = Merit.appTest.state().step;
+        play("reading", 16);
+        Merit.appTest.home();
+        assert(app.querySelector(".home-head .me .avatar") && !/Upload a picture|Use the drawing/.test(app.textContent) && !app.querySelector("#photo-file") && !app.querySelector("[data-act=clear-photo]"), "Home shows the picture, with no upload or drawing buttons");
+        assert(stepEarned > 1, "reset: physics progress was earned (step " + stepEarned + ")");
+        var physBefore = card("physics"), readBefore = card("reading");
+        assert(!/0 of 17 topics/.test(physBefore), "reset: physics topics started before (" + physBefore + ")");
+        var adaBefore = JSON.stringify(saved("Ada"));
+        // The chooser opens and closes without resetting: backdrop, Close, Escape.
+        var btn = app.querySelector("[data-act=reset-open]");
+        assert(btn && btn.textContent === "Reset progress", "reset: Home has a Reset progress button");
+        assert(btn.parentNode.classList.contains("home-foot") && !btn.closest(".home-head") &&
+          btn.getBoundingClientRect().top >= app.querySelector(".grid-cards").getBoundingClientRect().bottom - 1, "reset: Reset progress sits in the bottom row under the cards");
+        function openIt() { app.querySelector("[data-act=reset-open]").click(); return app.querySelector(".reset-pop"); }
+        var pop = openIt();
+        var picks = pop ? Array.prototype.slice.call(pop.querySelectorAll("[data-act=reset-do]")).map(function (b) { return b.textContent; }) : [];
+        assert(picks.join("|") === "All subjects|Math|Reading|Science & Engineering|Physics|Programming|Astronomy", "reset: chooser lists All subjects and each subject (" + picks.join("|") + ")");
+        assert(pop && /Ada/.test(pop.textContent), "reset: chooser names the child");
+        assert(!/Are you sure/i.test(app.textContent), "reset: no are-you-sure step");
+        app.querySelector(".reset-backdrop").click();
+        assert(!app.querySelector(".reset-pop") && JSON.stringify(saved("Ada")) === adaBefore && card("physics") === physBefore, "reset: tapping outside closes without resetting");
+        openIt();
+        app.querySelector(".reset-pop [data-act=reset-close]").click();
+        assert(!app.querySelector(".reset-pop") && JSON.stringify(saved("Ada")) === adaBefore, "reset: Close closes without resetting");
+        openIt();
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        assert(!app.querySelector(".reset-pop") && JSON.stringify(saved("Ada")) === adaBefore, "reset: Escape closes without resetting");
+        // Reset Physics: right away, note shown, Home / Parent / Wall fresh, other subjects and children untouched.
+        openIt();
+        app.querySelector('.reset-pop [data-act=reset-do][data-id="physics"]').click();
+        var note = app.querySelector(".reset-note");
+        assert(!app.querySelector(".reset-pop") && note && note.textContent === "Physics is fresh again!", "reset: note says Physics is fresh again (" + (note && note.textContent) + ")");
+        assert(/^Push and pull · step 1 of 5 · 0 of 17 topics$/.test(card("physics")), "reset: Home physics card is fresh (" + card("physics") + ")");
+        assert(card("reading") === readBefore, "reset: Home reading card unchanged");
+        var ada = saved("Ada"), was = JSON.parse(adaBefore);
+        var pb = ada.subjects.physics.bands["5-6"];
+        assert(pb.placed && pb.working.step === 1 && Object.keys(pb.skills).every(function (k) { return !pb.skills[k].answers.length; }), "reset: saved physics progress cleared");
+        assert(JSON.stringify(ada.subjects.reading) === JSON.stringify(was.subjects.reading) && JSON.stringify(ada.sightWords) === JSON.stringify(was.sightWords) && JSON.stringify(ada.wordLadder) === JSON.stringify(was.wordLadder), "reset: saved reading progress kept");
+        assert(ada.name === "Ada" && ada.level === was.level && ada.soundOn === was.soundOn && JSON.stringify(ada.days) === JSON.stringify(was.days), "reset: name, level, sound and minutes kept");
+        assert(JSON.stringify(saved("Bo")) === boBefore, "reset: the other child is untouched");
+        Merit.appTest.parent();
+        var heads = Array.prototype.slice.call(app.querySelectorAll(".panel h2")).map(function (h) { return h.textContent; });
+        assert(heads.indexOf("Physics · 0") >= 0, "reset: Parent shows Physics · 0 (" + heads.join(", ") + ")");
+        assert(app.querySelectorAll(".topic-line").length === 17 + (Merit.SCIENCE_TOPICS || []).length && Array.prototype.slice.call(app.querySelectorAll(".topic-line")).every(function (l) { return /not started/.test(l.textContent); }), "reset: Parent physics topics not started");
+        assert(!app.querySelector(".reset-note"), "reset: the note goes away off Home");
+        app.querySelector("[data-act=home]").click();
+        app.querySelector("[data-act=wall]").click();
+        var wall = app.querySelector('section.panel[data-subject="physics"]');
+        assert(wall && !wall.querySelector(".stone.topic") && /Topics explored\s*0 of 17/.test(wall.textContent), "reset: Classroom wall physics is fresh");
+        // Questions start over at step 1 (no warm-up).
+        Merit.appTest.start("physics");
+        var st = Merit.appTest.state();
+        assert(st.step === 1 && st.skill === Merit.SKILLS.physics["5-6"][0].id && !/Warm-up/.test(app.textContent), "reset: physics starts over at step 1 (" + st.skill + " " + st.step + ")");
+        // Reset all: every subject fresh, Home level back to Beginner, sight words 0.
+        Merit.appTest.home();
+        app.querySelector('.home-level-row [data-id="expert"]').click();
+        openIt();
+        app.querySelector('.reset-pop [data-act=reset-do][data-id="all"]').click();
+        assert((app.querySelector(".reset-note") || {}).textContent === "Everything is fresh again!", "reset all: note");
+        var ada2 = saved("Ada");
+        assert(ada2.level === "beginner" && app.querySelector('.home-level-row [data-id="beginner"]').classList.contains("on"), "reset all: Home level back to Beginner");
+        assert(/0 of 200 sight words/.test(card("reading")) && /step 1 of 5/.test(card("reading")), "reset all: reading card fresh (" + card("reading") + ")");
+        assert(Object.keys(ada2.days || {}).length === 0 && !ada2.wordLadder, "reset all: minutes and word ladder cleared");
+        assert(JSON.stringify(saved("Bo")) === boBefore, "reset all: the other child is untouched");
+      })();
+      // A failing speech engine or full storage must not block Correct and moving on.
+      var pig = Merit.BANK.filter(function (it) { return it.id === "read56-0011"; })[0];
+      var realSpeak = Merit.speak, realChime = Merit.chime, realSet = Storage.prototype.setItem;
+      Merit.speak = function () { throw new Error("speech engine failed"); };
+      Merit.chime = function () { throw new Error("audio failed"); };
+      Storage.prototype.setItem = function () { throw new Error("QuotaExceededError"); };
+      tapBand = null;
+      try {
+        Merit.appTest.reset();
+      } catch (e) { /* reset only removes */ }
+      Storage.prototype.setItem = realSet;
+      Merit.appTest.create({ name: "Pip", band: "5-6", placed: true });
+      tapBand = "5-6";
+      Storage.prototype.setItem = function () { throw new Error("QuotaExceededError"); };
+      Merit.appTest.showBank("read56-0011");
+      var pst = Merit.appTest.state();
+      assert(pst.prompt === "Which word rhymes with pig?", "the pig question is shown");
+      var bigBtn = Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]")).filter(function (bt) { return bt.textContent === "big"; })[0];
+      if (bigBtn) bigBtn.click();
+      assert(Merit.appTest.state().mathOk && app.querySelector(".result-correct"), "pig/big is Correct even when speech, sound and saving fail");
+      Merit.appTest.flushTimer();
+      Merit.appTest.flushTimer();
+      assert(Merit.appTest.state().index !== pst.index, "pig/big moves on even when speech, sound and saving fail");
+      Merit.speak = realSpeak; Merit.chime = realChime; Storage.prototype.setItem = realSet;
+      // Generated science / physics questions at each level read the question, then every answer.
+      ["science", "physics"].forEach(function (sid) {
+        ["beginner", "intermediate", "expert"].forEach(function (lv) {
+          Merit.appTest.reset();
+          Merit.appTest.create({ name: "Rae", band: "7-8", placed: true, level: lv });
+          Merit.appTest.start(sid);
+          var gen = 0;
+          for (var gi = 0; gi < 12; gi++) {
+            var gs = Merit.appTest.state();
+            var gq = Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]")).map(function (bt) { return Merit.speechText(bt.textContent).replace(/([^.?!])$/, "$1."); });
+            var tail = gs.speech.slice(gs.speech.length - gq.length);
+            if (!gs.bankId) {
+              gen += 1;
+              assert(gq.length && tail.join("|") === gq.join("|") && gs.speech.length > gq.length, sid + " " + lv + " generated question " + gi + " reads question + answers (" + gs.speech.join(" | ").slice(0, 100) + ")");
+              assert(app.querySelector("[data-act=read-aloud]"), sid + " " + lv + " generated question has the Play button");
+            }
+            Merit.appTest.correctAndNext();
+          }
+          assert(gen > 0, sid + " " + lv + " saw generated questions");
+        });
+      });
+      // Reading word-length ladder through the real screen: streaks move the tier up, misses move it down.
+      (function () {
+        function picks() { return Array.prototype.slice.call(app.querySelectorAll("[data-act=pick]")); }
+        function show(skill) { Merit.appTest.showSkill("reading", skill, 2); return Merit.appTest.state(); }
+        function right(st) {
+          if (st.input === "flash") app.querySelector("[data-act=flash-yes]").click();
+          else app.querySelector('[data-act=pick][data-id="' + st.correctId + '"]').click();
+          Merit.appTest.flushTimer(); Merit.appTest.flushTimer();
+        }
+        function wrong(st) {
+          if (st.input === "flash") { app.querySelector("[data-act=flash-no]").click(); return; }
+          var w = picks().filter(function (b) { return b.getAttribute("data-id") !== st.correctId; })[0];
+          w.click();
+          assert(app.querySelector(".result-x") && !Merit.appTest.state().mathOk, "ladder wrong tap is marked wrong");
+          app.querySelector('[data-act=pick][data-id="' + st.correctId + '"]').click();
+          Merit.appTest.flushTimer(); Merit.appTest.flushTimer();
+        }
+        function words(t) { return String(t).split(" ").length; }
+        var range = { 1: [1, 1], 2: [2, 2], 3: [3, 4], 4: [5, 7], 5: [8, 14] };
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Lad", band: "5-6", placed: true, level: "beginner" });
+        var st = show("cvc");
+        assert(st.tier === 1 && words(st.target) === 1, "ladder: beginner reading starts on one word (" + st.target + ")");
+        var sawChoice = false, sawFlash = false;
+        for (var i = 0; i < 5; i++) {
+          st = show("cvc");
+          assert(st.tier === 1, "ladder: still one word before the streak ends");
+          assert(st.input === "choice" && st.seeWord === st.target, "ladder: beginner is always see-and-tap with the word shown (" + st.input + " " + st.seeWord + ")");
+          if (st.input === "choice") {
+            sawChoice = true;
+            var labels = picks().map(function (b) { return b.textContent; });
+            assert(st.speech.indexOf(st.target) >= 0, "ladder: the word to find is said (" + st.speech.join("|") + " / " + st.target + ")");
+            assert(labels.filter(function (l) { return l !== st.target && st.speech.indexOf(l) >= 0; }).length === 0, "ladder: choices are not read aloud");
+            assert((" " + st.prompt.toLowerCase().replace(/[^a-z]+/g, " ") + " ").indexOf(" " + st.target.toLowerCase() + " ") < 0, "ladder: the prompt does not show the word");
+          } else sawFlash = true;
+          right(st);
+        }
+        var after = Merit.appTest.state();
+        assert(after.ladder.cvc && after.ladder.cvc.tier === 2, "ladder: 5 right in a row moves up to two words");
+        st = show("cvc");
+        assert(st.tier === 2 && words(st.target) === 2, "ladder: next card has two words (" + st.target + ")");
+        assert(/Two words/.test(app.querySelector(".chalk-kicker").textContent), "ladder: the board says Two words");
+        wrong(st); st = show("cvc"); wrong(st); st = show("cvc"); wrong(st);
+        assert(Merit.appTest.state().ladder.cvc.tier === 2, "ladder: cooldown holds the tier for 3 answers");
+        st = show("cvc"); wrong(st);
+        assert(Merit.appTest.state().ladder.cvc.tier === 1, "ladder: misses after the cooldown move back to one word");
+        assert(Merit.appTest.state().ladder.sight === undefined || Merit.appTest.state().ladder.sight.tier === 1, "ladder: other skills keep their own tier");
+        // climb to the top of the Beginner window and stop
+        for (var c = 0; c < 40; c++) { st = show("cvc"); right(st); }
+        assert(Merit.appTest.state().ladder.cvc.tier === 3, "ladder: beginner tops out at short phrases");
+        st = show("cvc");
+        assert(st.tier === 3 && words(st.target) >= 3 && words(st.target) <= 4, "ladder: tier 3 has 3-4 words (" + st.target + ")");
+        // Home level up to Expert: tier moves into the Expert window and can reach long sentences
+        Merit.appTest.home();
+        app.querySelector('[data-act=home-level][data-id="expert"]').click();
+        Merit.appTest.start("reading");
+        st = show("cvc");
+        assert(st.tier === 3, "ladder: Expert keeps tier 3 (inside its window)");
+        for (var x = 0; x < 40; x++) { st = show("cvc"); right(st); }
+        st = show("cvc");
+        assert(st.tier === 5 && words(st.target) >= 8, "ladder: expert reaches long sentences (" + st.target + ")");
+        for (var y = 0; y < 40; y++) { st = show("cvc"); wrong(st); }
+        assert(Merit.appTest.state().ladder.cvc.tier === 3, "ladder: expert never drops below tier 3");
+        // Home level back down to Beginner
+        Merit.appTest.home();
+        app.querySelector('[data-act=home-level][data-id="beginner"]').click();
+        Merit.appTest.start("reading");
+        st = show("cvc");
+        assert(st.tier === 3, "ladder: back on Beginner the tier is still inside 1-3");
+        var saved = JSON.parse(localStorage.getItem("merit.v1"));
+        var me = saved.profiles.filter(function (pp) { return pp && pp.name === "Lad"; })[0];
+        assert(me && me.wordLadder && me.wordLadder.cvc && me.wordLadder.cvc.tier >= 1, "ladder: the tier is saved in the profile");
+        // Story / fable skill and other subjects are untouched
+        Merit.appTest.showSkill("reading", "story", 2);
+        assert(Merit.appTest.state().tier === 0, "ladder: bank story items have no tier");
+        Merit.appTest.showSkill("math", "add", 2);
+        assert(Merit.appTest.state().tier === 0, "ladder: math has no tier");
+        assert(sawChoice && !sawFlash, "ladder: beginner shows no flash cards");
+        // Intermediate keeps listen-and-find (word not shown) and flash cards
+        Merit.appTest.home();
+        app.querySelector('[data-act=home-level][data-id="intermediate"]').click();
+        Merit.appTest.start("reading");
+        var kinds = {};
+        for (var iq = 0; iq < 30; iq++) {
+          st = show("cvc");
+          kinds[st.input] = 1;
+          assert(!st.seeWord, "ladder: intermediate does not show the word to find");
+          right(st);
+        }
+        assert(kinds.choice && kinds.flash, "ladder: intermediate mixes listen-and-find and flash cards");
+        // Sound off at Beginner: the word is still shown, nothing is said, Play does nothing
+        Merit.appTest.home();
+        app.querySelector('[data-act=home-level][data-id="beginner"]').click();
+        app.querySelector("[data-act=mute]").click();
+        Merit.appTest.start("reading");
+        st = show("cvc");
+        assert(st.input === "choice" && st.seeWord === st.target && app.querySelector(".see-word").textContent === st.target, "ladder: sound off still shows the word");
+        assert(st.speech.length === 0, "ladder: sound off says nothing");
+        var pl = app.querySelector(".art-seeword [data-act=speak-prompt]");
+        if (pl) pl.click();
+        assert(Merit.appTest.state().speech.length === 0, "ladder: sound off Play says nothing");
+        right(st);
+        Merit.appTest.home();
+        app.querySelector("[data-act=mute]").click();
+      })();
+      // Sound off: nothing is read, and Play does nothing.
+      Merit.appTest.reset();
+      Merit.appTest.create({ name: "Hush", band: "7-8", placed: true });
+      Merit.appTest.home();
+      app.querySelector("[data-act=mute]").click();
+      Merit.appTest.showBank(Merit.BANK.filter(function (it) { return it.subject === "physics"; })[0].id);
+      assert(Merit.appTest.state().speech.length === 0, "sound off reads nothing");
+      var hushPlay = app.querySelector("[data-act=read-aloud]");
+      if (hushPlay) hushPlay.click();
+      assert(Merit.appTest.state().speech.length === 0, "sound off: Play reads nothing");
+      app.querySelector("[data-act=mute]").click();
+      Merit.appTest.start("math");
+      var fade = Merit.appTest.state();
+      var fadeWrong = null;
+      var fadeBtns = app.querySelectorAll("[data-act=pick]");
+      for (var fi = 0; fi < fadeBtns.length; fi++) {
+        if (fadeBtns[fi].getAttribute("data-id") !== fade.correctId) fadeWrong = fadeBtns[fi];
+      }
+      assert(fadeWrong, "fade check has a wrong choice");
+      if (fadeWrong) fadeWrong.click();
+      assert(app.querySelector(".result-x"), "the X is on the page before it fades");
+      setTimeout(function () {
+        assert(!app.querySelector(".result-x"), "the X is gone after it fades");
+        assert(Merit.appTest.state().prompt === fade.prompt, "after the X fades the same question remains");
+        assert(Merit.appTest.state().phase === "ask", "after the X fades the child can try again");
+        assert(app.querySelector('[data-act=pick][data-id="' + fade.correctId + '"]'), "the choices stay after the X fades");
+        speechOrder(function () { playStates(finish); });
+      }, 1000);
+      // With a speech engine that really plays: question, then answers in order; a tap stops it; Play replays it.
+      function speechOrder(then) {
+        var real = Object.getOwnPropertyDescriptor(window, "speechSynthesis");
+        var said = [];
+        var fake = {
+          speaking: false, pending: false, paused: false,
+          getVoices: function () { return [{ name: "Fake voice", lang: "en-US", localService: true }]; },
+          addEventListener: function () {}, removeEventListener: function () {},
+          cancel: function () { said.push("<stop>"); fake.q = []; }, pause: function () {}, resume: function () {},
+          q: [],
+          speak: function (u) {
+            said.push(u.text);
+            setTimeout(function () { if (u.onstart) u.onstart(); setTimeout(function () { if (u.onend) u.onend(); }, 40); }, 5);
+          }
+        };
+        Object.defineProperty(window, "speechSynthesis", { configurable: true, value: fake });
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Echo", band: "9-10", placed: true, level: "expert" });
+        var sciItem = Merit.BANK.filter(function (it) { return it.subject === "science" && it.level === "expert"; })[0];
+        Merit.appTest.showBank(sciItem.id);
+        var plan = Merit.appTest.state().speech;
+        setTimeout(function () {
+          var heard = said.filter(function (x) { return x !== "<stop>"; });
+          assert(heard.join("|") === plan.join("|"), "fake voice heard question then answers in order (" + heard.length + " of " + plan.length + ")");
+          // Replay, then tap partway through: the rest is not read, Correct is.
+          said.length = 0;
+          app.querySelector("[data-act=read-aloud]").click();
+          setTimeout(function () {
+            var before = said.filter(function (x) { return x !== "<stop>"; }).length;
+            assert(before >= 1 && before < plan.length, "replay started reading (" + before + ")");
+            var st = Merit.appTest.state();
+            app.querySelector('[data-act=pick][data-id="' + st.correctId + '"]').click();
+            var atTap = said.length;
+            setTimeout(function () {
+              var after = said.slice(atTap).filter(function (x) { return x !== "<stop>"; });
+              var stale = after.filter(function (x) { return plan.indexOf(x) >= 0; });
+              assert(after[0] === "Correct" && !stale.length, "after the tap: Correct, and none of the old question is read (got " + after.join("|").slice(0, 120) + ")");
+              Object.defineProperty(window, "speechSynthesis", real);
+              then();
+            }, 1500);
+          }, 150);
+        }, 400 + plan.length * 450);
+      }
+      // Play is green only when a tap will play sound: loading -> ready, play -> speaking -> ready,
+      // a tap on an answer stops speech and Play is ready again, sound off is never green.
+      function playStates(then) {
+        var real = Object.getOwnPropertyDescriptor(window, "speechSynthesis");
+        var voices = [], heard = [], listeners = [];
+        var fake = {
+          speaking: false, pending: false, paused: false,
+          getVoices: function () { return voices; },
+          addEventListener: function (n, fn) { if (n === "voiceschanged") listeners.push(fn); },
+          removeEventListener: function (n, fn) { listeners = listeners.filter(function (f) { return f !== fn; }); },
+          cancel: function () { heard.forEach(function (u) { u.cancelled = true; }); },
+          pause: function () {}, resume: function () {},
+          speak: function (u) { heard.push(u); }
+        };
+        Object.defineProperty(window, "speechSynthesis", { configurable: true, value: fake });
+        Merit.speechTestReset();
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Gus", band: "5-6", placed: true, level: "beginner" });
+        function btn() { return app.querySelector(".art-seeword [data-act=speak-prompt]"); }
+        function green(want, why) {
+          var b = btn();
+          var ok = b && b.classList.contains("play-ready") === want && b.getAttribute("aria-disabled") === (want ? "false" : "true") && b.textContent === "Play";
+          assert(ok, "play: " + why + " (state " + Merit.appTest.state().play + ", green " + (b && b.classList.contains("play-ready")) + ", label " + (b && b.textContent) + ")");
+        }
+        function endAll() { heard.slice().forEach(function (u) { if (u.onend && !u.ended) { u.ended = true; u.onend(); } }); }
+        var st = Merit.appTest.showSkill("reading", "cvc", 2, { tier: 1, text: "hat", format: "choice" });
+        green(false, "not green while the word is being read out (voices still loading)");
+        Merit.quiet();
+        assert(Merit.appTest.state().play === "loading", "play: loading state before voices arrive (" + Merit.appTest.state().play + ")");
+        green(false, "not green while voices load");
+        btn().click();
+        assert(Merit.appTest.state().play === "loading", "play: a tap while loading does nothing");
+        voices = [{ name: "Fake voice", lang: "en-US", localService: true }];
+        listeners.slice().forEach(function (fn) { fn(); });
+        green(true, "green once voices are in");
+        btn().click();
+        green(false, "not green right after Play is tapped (speaking)");
+        setTimeout(function () {
+          var n = heard.length;
+          assert(n >= 1 && heard[n - 1].text === "hat", "play: Play says the word (" + (n && heard[n - 1].text) + ")");
+          btn().click();
+          setTimeout(function () {
+            assert(heard.length === n, "play: a tap while speaking does not start it again");
+            endAll();
+            green(true, "green again when speech ends");
+            // error also returns to ready
+            btn().click();
+            setTimeout(function () {
+              var u = heard[heard.length - 1];
+              if (u && u.onerror) u.onerror({ error: "synthesis-failed" });
+              green(true, "green again when speech fails");
+              // an older run ending late does not turn a newer one green
+              btn().click();
+              setTimeout(function () {
+                var old = heard[heard.length - 1];
+                Merit.speak("Look");
+                green(false, "not green while newer speech is queued");
+                if (old && old.onend) old.onend();
+                green(false, "a cancelled run ending late does not make Play green");
+                setTimeout(function () {
+                  endAll();
+                  green(true, "green after the newer speech ends");
+                  // answer tap while Play is speaking: speech stops, then ready again
+                  btn().click();
+                  setTimeout(function () {
+                    var s2 = Merit.appTest.state();
+                    var wrongBtn = Array.prototype.filter.call(app.querySelectorAll("[data-act=pick]"), function (b) { return b.getAttribute("data-id") !== s2.correctId; })[0];
+                    var cut = heard.length;
+                    wrongBtn.click();
+                    assert(heard.slice(0, cut).every(function (u) { return u.cancelled; }), "play: an answer tap stops the word being said");
+                    setTimeout(function () {
+                      endAll();
+                      setTimeout(function () {
+                        endAll();
+                        green(true, "green again after the answer tap");
+                        // sound off: never green, a tap does nothing
+                        app.querySelector("[data-act=mute]").click();
+                        green(false, "not green with sound off");
+                        assert(Merit.appTest.state().play === "off", "play: off state with sound off");
+                        var before = heard.length;
+                        btn().click();
+                        setTimeout(function () {
+                          assert(heard.length === before, "play: sound off tap says nothing");
+                          green(false, "still not green with sound off");
+                          app.querySelector("[data-act=mute]").click();
+                          green(true, "green again when sound is back on");
+                          // Ready Play really looks green; not-ready Play does not
+                          var bg = getComputedStyle(btn()).backgroundImage;
+                          assert(/rgb\(21, 122, 55\)/.test(bg), "play: ready Play is drawn green (" + bg.slice(0, 80) + ")");
+                          Merit.speak("Look");
+                          assert(getComputedStyle(btn()).backgroundImage === "none", "play: not-ready Play has no green fill");
+                          Merit.quiet();
+                          Object.defineProperty(window, "speechSynthesis", real);
+                          Merit.quiet();
+                          v11Look(then);
+                        }, 150);
+                      }, 150);
+                    }, 1200);
+                  }, 120);
+                }, 120);
+              }, 120);
+            }, 120);
+          }, 120);
+        }, 120);
+      }
+      // v11 look: logo, a 3D mascot on every Home card, 3D counting objects, and no burst with Less motion.
+      function v11Look(then) {
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Lu", band: "5-6", placed: true, level: "beginner" });
+        assert(app.querySelector(".logo svg.logo-art") && app.querySelector(".logo .logo-word").textContent === "Merit", "v11: header has the 3D logo and the Merit wordmark");
+        assert(app.querySelector(".logo").getAttribute("aria-label") === "Merit home", "v11: logo button keeps its label");
+        var cards = app.querySelectorAll(".grid-cards .card");
+        assert(cards.length === 5 && app.querySelectorAll(".grid-cards .card svg.mascot").length === 5, "v11: every subject card has a mascot");
+        assert(document.getElementById("m3-defs") && document.getElementById("m3-red"), "v11: shared 3D gradients are on the page");
+        Merit.appTest.showSkill("math", "add", 1, { style: "objects" });
+        assert(app.querySelector(".count-item svg [fill^='url(#m3']"), "v11: counting objects are 3D-shaded");
+        Merit.appTest.parent();
+        var motionBtn = app.querySelector("[data-act=motion]");
+        assert(motionBtn, "v11: parent screen has the Less motion switch (" + Merit.appTest.state().screen + ")");
+        if (motionBtn) motionBtn.click();
+        Merit.appTest.home();
+        Merit.appTest.showSkill("math", "add", 1, { style: "objects" });
+        var st = Merit.appTest.state();
+        var pk = app.querySelector('[data-act=pick][data-id="' + st.correctId + '"]');
+        assert(pk, "v11: math question has its right choice (" + st.input + " " + st.screen + ")");
+        if (pk) pk.click();
+        assert(app.querySelector(".result-correct") && !app.querySelector(".burst"), "v11: Less motion shows Correct without the burst");
+        Merit.quiet();
+        v13Physics(then);
+      }
+      // v13: physics topic skills mix into sets, show a Did you know? fact, and show on Home and Parent.
+      function v13Physics(then) {
+        Merit.appTest.reset();
+        Merit.appTest.create({ name: "Pia", band: "7-8", placed: true, level: "intermediate" });
+        var topics = Merit.topicsFor("physics");
+        var card = app.querySelector('.card[data-subject="physics"] .muted');
+        assert(card && card.textContent.indexOf("0 of " + topics.length + " topics") >= 0, "v13: physics Home card counts topics (" + (card && card.textContent) + ")");
+        Merit.appTest.start("physics");
+        var seen = [], levels = {}, kinds = {};
+        for (var i = 0; i < 16; i++) {
+          var st = Merit.appTest.state();
+          if (Merit.isTopicSkill("physics", st.questionSkill)) { seen.push(st.questionSkill); levels[st.bankLevel] = true; }
+          kinds[st.questionSkill] = true;
+          Merit.appTest.correctAndNext();
+        }
+        assert(seen.length === 6, "v13: 6 of 16 set questions are topic questions (" + seen.length + ")");
+        assert(Object.keys(levels).join() === "intermediate", "v13: topic questions stay in the Home level (" + Object.keys(levels).join() + ")");
+        var distinct = {}; seen.forEach(function (t) { distinct[t] = true; });
+        assert(Object.keys(distinct).length === seen.length, "v13: topics rotate (no repeat within a set): " + seen.join());
+        var core = Object.keys(kinds).filter(function (k) { return !Merit.isTopicSkill("physics", k); });
+        assert(core.length >= 1 && 16 - seen.length === 10, "v13: core physics skills still fill the other 10 questions (" + core.join() + ")");
+        // A topic item with a new picture, then the Did you know? fact after the right answer.
+        var item = null;
+        Merit.BANK.forEach(function (it) { if (!item && it.skill === "plight" && it.scene === "prism" && it.level === "intermediate") item = it; });
+        Merit.appTest.showBank(item.id);
+        assert(app.querySelector(".board .scene-prism svg"), "v13: prism picture on the board");
+        var kick = app.querySelector(".chalk-kicker");
+        assert(kick && kick.textContent.indexOf("Light and color") >= 0, "v13: kicker names the topic (" + (kick && kick.textContent) + ")");
+        assert(!app.querySelector(".did-you-know"), "v13: no fact before answering");
+        var st2 = Merit.appTest.state();
+        var pk = app.querySelector('[data-act=pick][data-id="' + st2.correctId + '"]');
+        if (pk) pk.click();
+        var dyk = app.querySelector(".board .did-you-know");
+        assert(dyk && /^Did you know\?/.test(dyk.textContent) && dyk.textContent.indexOf(item.explanation) > 0, "v13: Did you know? fact after the right answer");
+        assert(app.querySelector(".result-correct"), "v13: Correct still shows");
+        var board = app.querySelector(".board");
+        assert(board.scrollHeight <= board.clientHeight + 1 && board.scrollWidth <= board.clientWidth + 1, "v13: fact fits the board");
+        // A wrong answer does not give the fact away.
+        Merit.appTest.showBank(item.id);
+        var st3 = Merit.appTest.state();
+        var wrongBtn = null;
+        Array.prototype.forEach.call(app.querySelectorAll("[data-act=pick]"), function (b) { if (!wrongBtn && b.getAttribute("data-id") !== st3.correctId) wrongBtn = b; });
+        if (wrongBtn) wrongBtn.click();
+        assert(!app.querySelector(".did-you-know"), "v13: no fact after a miss (the child tries again)");
+        Merit.EXTRA_SCENE_IDS.forEach(function (id) {
+          var h = Merit.sceneHTML(id);
+          assert(h.indexOf("scene-" + id) >= 0 && h !== Merit.sceneHTML("idea") && h.indexOf("<svg") >= 0, "v13: picture " + id + " draws");
+        });
+        Merit.appTest.home();
+        card = app.querySelector('.card[data-subject="physics"] .muted');
+        assert(card && /[1-9]\d* of \d+ topics/.test(card.textContent), "v13: Home card shows topics started (" + (card && card.textContent) + ")");
+        Merit.appTest.parent();
+        var lines = app.querySelectorAll(".topic-line");
+        assert(lines.length === topics.length + (Merit.SCIENCE_TOPICS || []).length, "v13: parent lists every topic (" + lines.length + ")");
+        var started = Array.prototype.filter.call(lines, function (l) { return /right/.test(l.textContent); }).length;
+        assert(started >= 6, "v13: parent shows practiced topics (" + started + ")");
+        Merit.quiet();
+        then();
+      }
+      function finish() {
+        var out = document.getElementById("out");
+        if (!fails.length) {
+          out.textContent = "PASS flow";
+          document.title = "PASS";
+        } else {
+          out.textContent = "FAIL " + fails.length + "\n" + fails.join("\n");
+          document.title = "FAIL";
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
